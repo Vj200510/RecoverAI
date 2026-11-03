@@ -1,0 +1,52 @@
+{
+  "version": 3,
+  "sha256": "9d3b2039359bbef18e8c279baf00796b5fcbac169812371cc9d840ee9f374d5a",
+  "filename": "Problem_9_RecoverAI_Required_Changes.pdf",
+  "pageCount": 5,
+  "textPages": 5,
+  "textBudgetExhausted": false,
+  "pagesWithoutText": [],
+  "renderedPages": [
+    {
+      "page": 1,
+      "width": 1108,
+      "height": 1566,
+      "bytes": 185690,
+      "mime": "image/png",
+      "fileName": "page-001.png"
+    },
+    {
+      "page": 2,
+      "width": 1108,
+      "height": 1566,
+      "bytes": 189895,
+      "mime": "image/png",
+      "fileName": "page-002.png"
+    },
+    {
+      "page": 3,
+      "width": 1108,
+      "height": 1566,
+      "bytes": 173480,
+      "mime": "image/png",
+      "fileName": "page-003.png"
+    },
+    {
+      "page": 4,
+      "width": 1108,
+      "height": 1566,
+      "bytes": 212710,
+      "mime": "image/png",
+      "fileName": "page-004.png"
+    },
+    {
+      "page": 5,
+      "width": 1108,
+      "height": 1566,
+      "bytes": 232006,
+      "mime": "image/png",
+      "fileName": "page-005.png"
+    }
+  ],
+  "renderBudgetExhausted": false
+}
