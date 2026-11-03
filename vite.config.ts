@@ -1,4 +1,4 @@
-// @lovable.dev/vite-tanstack-config already includes the following ΓÇö do NOT add them manually
+// @lovable.dev/vite-tanstack-config already includes the following — do NOT add them manually
 // or the app will break with duplicate plugins:
 //   - TanStack devtools (dev-only, first), tanstackStart, viteReact, tailwindcss, tsConfigPaths,
 //     nitro (build-only using cloudflare as a default target), VITE_* env injection, @ path alias,
@@ -13,6 +13,11 @@ export default defineConfig({
     // Do NOT hard-code keys here.
   },
   tanstackStart: {
-    server: { entry: "server" },
+    server: {
+      entry: "server",
+      // Use node-server preset for Render / any Node.js host.
+      // Change to "cloudflare-pages" or "cloudflare" for Cloudflare deployment.
+      preset: "node-server",
+    },
   },
 });
