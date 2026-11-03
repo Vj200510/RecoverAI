@@ -7,17 +7,8 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
-  vite: {
-    // VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are read from .env.local at dev time
-    // and from the hosting environment at build/production time.
-    // Do NOT hard-code keys here.
-  },
+  vite: {},
   tanstackStart: {
-    server: {
-      entry: "server",
-      // Use node-server preset for Render / any Node.js host.
-      // Change to "cloudflare-pages" or "cloudflare" for Cloudflare deployment.
-      preset: "node-server",
-    },
+    server: { entry: "server" },
   },
 });
