@@ -46,17 +46,18 @@ export const Route = createFileRoute("/api/health")({
           try {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 8000);
-            const res = await fetch(`${supabaseUrl}/rest/v1/`, {
+            // Use auth/v1/settings — returns HTTP 200 with the anon key.
+            // The REST /rest/v1/ endpoint returns 401 even with a valid anon key
+            // when no table is queried (schema cache response), causing false negatives.
+            const res = await fetch(`${supabaseUrl}/auth/v1/settings`, {
               method: "GET",
               headers: { apikey: supabaseKey, Accept: "application/json" },
               signal: controller.signal,
             }).finally(() => clearTimeout(timer));
 
-            if (res.ok || res.status === 400) {
-              // 200 = authenticated query, 400 = schema response (valid anon key, empty query)
+            if (res.ok) {
               supabaseStatus = "connected";
             } else if (res.status === 401) {
-              // 401 = the anon key is wrong — the server is reachable but credentials are invalid
               supabaseStatus = "invalid_credentials";
             } else {
               supabaseStatus = "unavailable";
