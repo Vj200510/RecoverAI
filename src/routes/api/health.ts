@@ -45,7 +45,7 @@ export const Route = createFileRoute("/api/health")({
         if (supabaseUrl && supabaseKey) {
           try {
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 4000);
+            const timer = setTimeout(() => controller.abort(), 8000);
             const res = await fetch(`${supabaseUrl}/rest/v1/`, {
               method: "GET",
               headers: { apikey: supabaseKey, Accept: "application/json" },
