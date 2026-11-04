@@ -2,7 +2,7 @@ services:
   - type: web
     name: recoverai
     runtime: node
-    region: singapore
+    region: oregon
     plan: free
     buildCommand: npm install && npm run build
     startCommand: node .output/server/index.mjs

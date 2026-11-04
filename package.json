@@ -14,6 +14,7 @@
     "test:red-team": "bun run scripts/problem9-red-team.ts",
     "test:live": "tsx scripts/problem9-live.ts",
     "test:paypal": "tsx scripts/paypal-security.ts",
+    "test:paypal-boundary": "tsx scripts/paypal-boundary.ts",
     "format": "prettier --write ."
   },
   "overrides": {

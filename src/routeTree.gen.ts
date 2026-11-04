@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiPaypalWebhookRouteImport } from './routes/api/paypal-webhook'
+import { Route as ApiReadyRouteImport } from './routes/api/ready'
 import { Route as AuthenticatedConsoleIndexRouteImport } from './routes/_authenticated/console.index'
 import { Route as AuthenticatedConsoleAgentRouteImport } from './routes/_authenticated/console.agent'
 import { Route as AuthenticatedConsoleAnalyticsRouteImport } from './routes/_authenticated/console.analytics'
@@ -49,6 +50,11 @@ const ApiHealthRoute = ApiHealthRouteImport.update({
 const ApiPaypalWebhookRoute = ApiPaypalWebhookRouteImport.update({
   id: '/api/paypal-webhook',
   path: '/api/paypal-webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiReadyRoute = ApiReadyRouteImport.update({
+  id: '/api/ready',
+  path: '/api/ready',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedConsoleIndexRoute =
@@ -129,6 +135,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/api/health': typeof ApiHealthRoute
   '/api/paypal-webhook': typeof ApiPaypalWebhookRoute
+  '/api/ready': typeof ApiReadyRoute
   '/console/agent': typeof AuthenticatedConsoleAgentRoute
   '/console/analytics': typeof AuthenticatedConsoleAnalyticsRoute
   '/console/audit': typeof AuthenticatedConsoleAuditRoute
@@ -147,6 +154,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/api/health': typeof ApiHealthRoute
   '/api/paypal-webhook': typeof ApiPaypalWebhookRoute
+  '/api/ready': typeof ApiReadyRoute
   '/console/agent': typeof AuthenticatedConsoleAgentRoute
   '/console/analytics': typeof AuthenticatedConsoleAnalyticsRoute
   '/console/audit': typeof AuthenticatedConsoleAuditRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/api/health': typeof ApiHealthRoute
   '/api/paypal-webhook': typeof ApiPaypalWebhookRoute
+  '/api/ready': typeof ApiReadyRoute
   '/_authenticated/console/agent': typeof AuthenticatedConsoleAgentRoute
   '/_authenticated/console/analytics': typeof AuthenticatedConsoleAnalyticsRoute
   '/_authenticated/console/audit': typeof AuthenticatedConsoleAuditRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/api/health'
     | '/api/paypal-webhook'
+    | '/api/ready'
     | '/console/agent'
     | '/console/analytics'
     | '/console/audit'
@@ -205,6 +215,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/api/health'
     | '/api/paypal-webhook'
+    | '/api/ready'
     | '/console/agent'
     | '/console/analytics'
     | '/console/audit'
@@ -224,6 +235,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/api/health'
     | '/api/paypal-webhook'
+    | '/api/ready'
     | '/_authenticated/console/agent'
     | '/_authenticated/console/analytics'
     | '/_authenticated/console/audit'
@@ -244,6 +256,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ApiHealthRoute: typeof ApiHealthRoute
   ApiPaypalWebhookRoute: typeof ApiPaypalWebhookRoute
+  ApiReadyRoute: typeof ApiReadyRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -281,6 +294,13 @@ declare module '@tanstack/react-router' {
       path: '/api/paypal-webhook'
       fullPath: '/api/paypal-webhook'
       preLoaderRoute: typeof ApiPaypalWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/ready': {
+      id: '/api/ready'
+      path: '/api/ready'
+      fullPath: '/api/ready'
+      preLoaderRoute: typeof ApiReadyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/console/': {
@@ -411,6 +431,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   ApiHealthRoute: ApiHealthRoute,
   ApiPaypalWebhookRoute: ApiPaypalWebhookRoute,
+  ApiReadyRoute: ApiReadyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
