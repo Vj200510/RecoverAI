@@ -268,6 +268,13 @@ export async function captureRecoveryOrder(
     };
   }
 
+  // 2b. Guard: transaction already RECOVERED — prevent duplicate payment.
+  if (["SUCCESS", "RECOVERED"].includes(tx.status.toUpperCase())) {
+    fail(
+      `This transaction is already ${tx.status}. Capturing an already-paid transaction is not permitted.`,
+    );
+  }
+
   // 3. Check for existing capture record (DB-level idempotency).
   const { data: existingCaptures } = await db
     .from("paypal_captures")
@@ -641,15 +648,27 @@ export async function analyzePayPalTransaction(
     .eq("paypal_order_id", paypalOrderId)
     .eq("user_id", userId);
 
-  // 4. Map PayPal status to internal failure reason for the AI engine.
-  //    The AI receives real PayPal evidence, not invented context.
+  // 4. Guard: do not run AI analysis on already-completed payments.
+  //    A COMPLETED order means the customer paid — there is nothing to recover.
+  if (liveOrder.status === "COMPLETED") {
+    fail(
+      `PayPal order ${paypalOrderId} is already COMPLETED. The payment succeeded — no recovery analysis is needed.`,
+    );
+  }
+
+  // 5. Map authoritative PayPal order status to internal failure context.
+  //    We only reach this point for non-COMPLETED orders.
+  //    Mapping rationale (no status is invented — all come from the live PayPal response):
+  //    CREATED / SAVED           → customer has not yet started checkout → checkout_abandoned
+  //    PAYER_ACTION_REQUIRED     → PayPal needs additional customer action → authentication_failed
+  //    VOIDED                    → merchant or PayPal voided the order → bank_declined
+  //    APPROVED (rare edge case) → customer approved but capture pending → network_error
   const paypalStatusMap: Record<string, { failureReason: string; txStatus: string }> = {
     CREATED: { failureReason: "checkout_abandoned", txStatus: "ABANDONED" },
     SAVED: { failureReason: "checkout_abandoned", txStatus: "ABANDONED" },
-    APPROVED: { failureReason: "network_error", txStatus: "FAILED" },
-    VOIDED: { failureReason: "bank_declined", txStatus: "FAILED" },
     PAYER_ACTION_REQUIRED: { failureReason: "authentication_failed", txStatus: "FAILED" },
-    COMPLETED: { failureReason: null as unknown as string, txStatus: "SUCCESS" },
+    VOIDED: { failureReason: "bank_declined", txStatus: "FAILED" },
+    APPROVED: { failureReason: "network_error", txStatus: "FAILED" },
   };
 
   const mapped = paypalStatusMap[liveOrder.status] ?? {
@@ -657,7 +676,8 @@ export async function analyzePayPalTransaction(
     txStatus: "FAILED",
   };
 
-  // 5. Update the internal transaction with real PayPal evidence.
+  // 6. Update the internal transaction with real PayPal evidence.
+  //    Only update to non-SUCCESS status — COMPLETED was already guarded above.
   await db
     .from("transactions")
     .update({
@@ -665,9 +685,11 @@ export async function analyzePayPalTransaction(
       status: mapped.txStatus,
     })
     .eq("id", orderRecord.transaction_id)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    // Safety: never overwrite a RECOVERED transaction via analysis
+    .neq("status", "RECOVERED");
 
-  // 6. Run the existing AI analysis pipeline with the enriched transaction.
+  // 7. Run the existing AI analysis pipeline with the enriched transaction.
   const { analyzeCase } = await import("./agent.server");
   let caseId = orderRecord.case_id;
 
@@ -718,10 +740,10 @@ export async function analyzePayPalTransaction(
     }
   }
 
-  // 7. Run AI analysis — the AI will see the real PayPal-enriched transaction data.
+  // 8. Run AI analysis — the AI will see the real PayPal-enriched transaction data.
   const { decisionId, decision } = await analyzeCase(db, userId, caseId!, rules);
 
-  // 8. Write PayPal-specific audit event.
+  // 9. Write PayPal-specific audit event.
   await writeAudit(db, userId, [
     {
       event_type: "PAYPAL_AI_ANALYSIS",
@@ -753,7 +775,7 @@ export async function analyzePayPalTransaction(
       status: liveOrder.status,
       amount: Number(orderRecord.amount),
       currency: orderRecord.currency,
-      payerApproved: liveOrder.status === "APPROVED" || liveOrder.status === "COMPLETED",
+      payerApproved: liveOrder.status === "APPROVED",
     },
   };
 }

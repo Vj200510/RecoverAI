@@ -1,9 +1,23 @@
 /**
  * GET /api/health
  *
- * Returns application health for Render health checks and monitoring.
- * Tests actual service connectivity — not just env var presence.
- * Never exposes secrets, credentials, or infrastructure details.
+ * Tests actual service connectivity.
+ * Returns a structured status without exposing any secret values.
+ *
+ * Supabase status values:
+ *   connected          — REST API responded with a valid schema response
+ *   invalid_credentials — REST API responded 401 (anon key is wrong)
+ *   not_configured     — SUPABASE_URL or SUPABASE_ANON_KEY not set
+ *   unavailable        — network timeout or non-2xx/4xx response
+ *
+ * PayPal status values:
+ *   sandbox_connected  — OAuth token obtained from sandbox
+ *   live_connected     — OAuth token obtained from live API
+ *   not_configured     — PAYPAL_CLIENT_ID or PAYPAL_CLIENT_SECRET not set
+ *   error              — OAuth attempt failed
+ *
+ * HTTP status is always 200 so Render's health check passes during cold start.
+ * Check the "status" field in the body: "ok" | "degraded".
  */
 
 import { createFileRoute } from "@tanstack/react-router";
@@ -17,60 +31,77 @@ export const Route = createFileRoute("/api/health")({
         const uptime = process.uptime();
         const env = process.env["NODE_ENV"] ?? "development";
 
-        // ── 1. Supabase connectivity (actual DB ping, not just env check) ──────
-        let supabaseStatus: "connected" | "not_configured" | "error" = "not_configured";
+        // ── 1. Supabase — actual REST ping ────────────────────────────────────
+        type SupabaseStatus =
+          | "connected"
+          | "invalid_credentials"
+          | "not_configured"
+          | "unavailable";
+        let supabaseStatus: SupabaseStatus = "not_configured";
+
         const supabaseUrl = process.env["SUPABASE_URL"];
         const supabaseKey = process.env["SUPABASE_ANON_KEY"];
 
         if (supabaseUrl && supabaseKey) {
           try {
-            // Lightweight REST ping — checks the Supabase API responds.
-            // Uses a short timeout so the health endpoint responds quickly.
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 3000);
+            const timer = setTimeout(() => controller.abort(), 4000);
             const res = await fetch(`${supabaseUrl}/rest/v1/`, {
-              headers: { apikey: supabaseKey },
+              method: "GET",
+              headers: { apikey: supabaseKey, Accept: "application/json" },
               signal: controller.signal,
             }).finally(() => clearTimeout(timer));
-            // 200 OK = authed, 400 = malformed but alive, 401 = wrong key but alive
-            supabaseStatus =
-              res.ok || res.status === 400 || res.status === 401 ? "connected" : "error";
+
+            if (res.ok || res.status === 400) {
+              // 200 = authenticated query, 400 = schema response (valid anon key, empty query)
+              supabaseStatus = "connected";
+            } else if (res.status === 401) {
+              // 401 = the anon key is wrong — the server is reachable but credentials are invalid
+              supabaseStatus = "invalid_credentials";
+            } else {
+              supabaseStatus = "unavailable";
+            }
           } catch {
-            supabaseStatus = "error";
+            supabaseStatus = "unavailable";
           }
         }
 
-        // ── 2. PayPal connectivity (actual OAuth token request) ───────────────
-        let paypalStatus: "sandbox_connected" | "live_connected" | "not_configured" | "error" =
-          "not_configured";
-        const paypalClientId = process.env["PAYPAL_CLIENT_ID"];
-        const paypalSecret = process.env["PAYPAL_CLIENT_SECRET"];
+        // ── 2. PayPal — actual OAuth attempt ─────────────────────────────────
+        type PayPalStatus =
+          | "sandbox_connected"
+          | "live_connected"
+          | "not_configured"
+          | "error";
+        let paypalStatus: PayPalStatus = "not_configured";
+
+        const hasPayPal =
+          !!process.env["PAYPAL_CLIENT_ID"] && !!process.env["PAYPAL_CLIENT_SECRET"];
         const paypalBase =
           process.env["PAYPAL_BASE_URL"] ?? "https://api-m.sandbox.paypal.com";
 
-        if (paypalClientId && paypalSecret) {
+        if (hasPayPal) {
           try {
             const { checkPayPalConnectivity } = await import("@/lib/paypal.server");
             const result = await checkPayPalConnectivity();
-            if (result.connected) {
-              paypalStatus = paypalBase.includes("sandbox")
+            paypalStatus = result.connected
+              ? paypalBase.includes("sandbox")
                 ? "sandbox_connected"
-                : "live_connected";
-            } else {
-              paypalStatus = "error";
-            }
+                : "live_connected"
+              : "error";
           } catch {
             paypalStatus = "error";
           }
         }
 
         // ── 3. Overall status ─────────────────────────────────────────────────
-        const allCriticalOk = supabaseStatus === "connected";
-        const status = allCriticalOk ? "ok" : "degraded";
+        // "ok"      — all critical services connected
+        // "degraded" — one or more services unavailable or misconfigured
+        const isHealthy = supabaseStatus === "connected";
+        const overallStatus = isHealthy ? "ok" : "degraded";
 
         return new Response(
           JSON.stringify({
-            status,
+            status: overallStatus,
             app: "RecoverAI",
             version: "1.0.0",
             environment: env,
@@ -82,7 +113,8 @@ export const Route = createFileRoute("/api/health")({
             },
           }),
           {
-            status: 200, // Always 200 so Render health check passes during startup
+            // Always HTTP 200 — Render reads body.status for health decisions.
+            status: 200,
             headers: { "Content-Type": "application/json" },
           },
         );
