@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiPaypalWebhookRouteImport } from './routes/api/paypal-webhook'
 import { Route as AuthenticatedConsoleIndexRouteImport } from './routes/_authenticated/console.index'
 import { Route as AuthenticatedConsoleAgentRouteImport } from './routes/_authenticated/console.agent'
@@ -38,6 +39,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPaypalWebhookRoute = ApiPaypalWebhookRouteImport.update({
@@ -121,6 +127,7 @@ const AuthenticatedConsoleRiskCaseIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/paypal-webhook': typeof ApiPaypalWebhookRoute
   '/console/agent': typeof AuthenticatedConsoleAgentRoute
   '/console/analytics': typeof AuthenticatedConsoleAnalyticsRoute
@@ -138,6 +145,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/paypal-webhook': typeof ApiPaypalWebhookRoute
   '/console/agent': typeof AuthenticatedConsoleAgentRoute
   '/console/analytics': typeof AuthenticatedConsoleAnalyticsRoute
@@ -157,6 +165,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/paypal-webhook': typeof ApiPaypalWebhookRoute
   '/_authenticated/console/agent': typeof AuthenticatedConsoleAgentRoute
   '/_authenticated/console/analytics': typeof AuthenticatedConsoleAnalyticsRoute
@@ -176,6 +185,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/api/health'
     | '/api/paypal-webhook'
     | '/console/agent'
     | '/console/analytics'
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/api/health'
     | '/api/paypal-webhook'
     | '/console/agent'
     | '/console/analytics'
@@ -211,6 +222,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/api/health'
     | '/api/paypal-webhook'
     | '/_authenticated/console/agent'
     | '/_authenticated/console/analytics'
@@ -230,6 +242,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiHealthRoute: typeof ApiHealthRoute
   ApiPaypalWebhookRoute: typeof ApiPaypalWebhookRoute
 }
 
@@ -254,6 +267,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/paypal-webhook': {
@@ -389,6 +409,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiHealthRoute: ApiHealthRoute,
   ApiPaypalWebhookRoute: ApiPaypalWebhookRoute,
 }
 export const routeTree = rootRouteImport

@@ -78,14 +78,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "RecoverAI — AI Payment Recovery" },
+      { name: "description", content: "AI-powered payment recovery platform. Detect failed payments, analyse failure context, and safely recover revenue via PayPal." },
+      { name: "author", content: "RecoverAI" },
+      { property: "og:title", content: "RecoverAI — AI Payment Recovery" },
+      { property: "og:description", content: "AI-powered payment recovery platform with PayPal Sandbox integration." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {

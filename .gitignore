@@ -1,3 +1,18 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-ssr
+.output
+.vinxi
+.nitro
+.tanstack/**
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
 # Logs
 logs
 *.log
@@ -7,20 +22,13 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-.output
-.vinxi
-.tanstack/**
-.nitro
-*.local
+# Environment variables — NEVER commit real credentials
+.env
+.env.*
+!.env.example
+!.env.local.example
 
-# Wrangler / Cloudflare
-.wrangler/
-.dev.vars
-
-# Editor directories and files
+# Editor
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -30,8 +38,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-# Environment variables
-.env
-.env.*
-!.env.example
-!.env.local.example
+
+# Supabase temp / linked project files
+supabase/.temp
+
+# Session and inbox data
+.opencode/
+
+# OS
+.DS_Store
+Thumbs.db
