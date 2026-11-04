@@ -1,12 +1,12 @@
 /**
  * GET /api/health
  *
- * Returns application health status for Render health checks and monitoring.
- * Never exposes secrets, credentials, or internal infrastructure details.
+ * Returns application health for Render health checks and monitoring.
+ * Tests actual service connectivity — not just env var presence.
+ * Never exposes secrets, credentials, or infrastructure details.
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { checkPayPalConnectivity } from "@/lib/paypal.server";
 
 export const Route = createFileRoute("/api/health")({
   component: () => null,
@@ -14,47 +14,73 @@ export const Route = createFileRoute("/api/health")({
   server: {
     handlers: {
       GET: async () => {
-        const startedAt = new Date().toISOString();
         const uptime = process.uptime();
+        const env = process.env["NODE_ENV"] ?? "development";
 
-        // Check PayPal config (no credentials exposed — just connected/not)
-        let paypalStatus = "not_configured";
-        const hasPayPalCreds =
-          !!process.env["PAYPAL_CLIENT_ID"] && !!process.env["PAYPAL_CLIENT_SECRET"];
-        if (hasPayPalCreds) {
+        // ── 1. Supabase connectivity (actual DB ping, not just env check) ──────
+        let supabaseStatus: "connected" | "not_configured" | "error" = "not_configured";
+        const supabaseUrl = process.env["SUPABASE_URL"];
+        const supabaseKey = process.env["SUPABASE_ANON_KEY"];
+
+        if (supabaseUrl && supabaseKey) {
           try {
+            // Lightweight REST ping — no auth, no data, just checks the API responds
+            const res = await fetch(`${supabaseUrl}/rest/v1/`, {
+              headers: { apikey: supabaseKey },
+              signal: AbortSignal.timeout(5000),
+            });
+            supabaseStatus = res.ok || res.status === 400 ? "connected" : "error";
+          } catch {
+            supabaseStatus = "error";
+          }
+        }
+
+        // ── 2. PayPal connectivity (actual OAuth token request) ───────────────
+        let paypalStatus: "sandbox_connected" | "live_connected" | "not_configured" | "error" =
+          "not_configured";
+        const paypalClientId = process.env["PAYPAL_CLIENT_ID"];
+        const paypalSecret = process.env["PAYPAL_CLIENT_SECRET"];
+        const paypalBase =
+          process.env["PAYPAL_BASE_URL"] ?? "https://api-m.sandbox.paypal.com";
+
+        if (paypalClientId && paypalSecret) {
+          try {
+            const { checkPayPalConnectivity } = await import("@/lib/paypal.server");
             const result = await checkPayPalConnectivity();
-            paypalStatus = result.connected
-              ? result.sandbox
+            if (result.connected) {
+              paypalStatus = paypalBase.includes("sandbox")
                 ? "sandbox_connected"
-                : "live_connected"
-              : "unreachable";
+                : "live_connected";
+            } else {
+              paypalStatus = "error";
+            }
           } catch {
             paypalStatus = "error";
           }
         }
 
-        // Check Supabase config (existence only — no values exposed)
-        const supabaseConfigured =
-          !!process.env["SUPABASE_URL"] && !!process.env["SUPABASE_ANON_KEY"];
+        // ── 3. Overall status ─────────────────────────────────────────────────
+        const allCriticalOk = supabaseStatus === "connected";
+        const status = allCriticalOk ? "ok" : "degraded";
 
-        const health = {
-          status: "ok",
-          app: "RecoverAI",
-          version: "1.0.0",
-          environment: process.env["NODE_ENV"] ?? "development",
-          uptime_seconds: Math.round(uptime),
-          timestamp: startedAt,
-          services: {
-            supabase: supabaseConfigured ? "configured" : "not_configured",
-            paypal: paypalStatus,
+        return new Response(
+          JSON.stringify({
+            status,
+            app: "RecoverAI",
+            version: "1.0.0",
+            environment: env,
+            uptime_seconds: Math.round(uptime),
+            timestamp: new Date().toISOString(),
+            services: {
+              supabase: supabaseStatus,
+              paypal: paypalStatus,
+            },
+          }),
+          {
+            status: 200, // Always 200 so Render health check passes during startup
+            headers: { "Content-Type": "application/json" },
           },
-        };
-
-        return new Response(JSON.stringify(health), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        );
       },
     },
   },

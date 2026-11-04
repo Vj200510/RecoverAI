@@ -154,8 +154,10 @@ export async function createRecoveryOrder(
     amount,
     currency,
     description: `RecoverAI payment recovery for transaction ${tx.transaction_ref}`,
-    returnUrl: `${baseUrl}/console/paypal/capture?order_id=PAYPAL_ORDER_ID&transaction_id=${transactionId}`,
-    cancelUrl: `${baseUrl}/console/paypal?cancelled=true&transaction_id=${transactionId}`,
+    // PayPal appends ?token=ORDER_ID to the return URL automatically.
+    // The console.paypal page reads search.order_id OR search.token on return.
+    returnUrl: `${baseUrl}/console/paypal`,
+    cancelUrl: `${baseUrl}/console/paypal?cancelled=true`,
   });
 
   const approveUrl = getApproveUrl(paypalOrder);
@@ -574,4 +576,184 @@ export async function processWebhookEvent(
       .eq("event_id", event.id);
     return { processed: false, skipped: false, reason: msg };
   }
+}
+
+// ─── Analyze a PayPal transaction with the AI recovery engine ─────────────────
+
+export interface PayPalAnalysisResult {
+  paypalOrderId: string;
+  paypalStatus: string;
+  internalTransactionId: string;
+  internalCaseId: string | null;
+  decisionId: string;
+  decision: {
+    diagnosis: string;
+    recovery_probability: number;
+    risk_level: string;
+    recommended_action: string;
+    reason: string;
+    confidence: number;
+    source: string;
+  };
+  paypalEvidence: {
+    orderId: string;
+    status: string;
+    amount: number;
+    currency: string;
+    payerApproved: boolean;
+  };
+}
+
+/**
+ * Fetches authoritative PayPal order status, enriches the internal transaction
+ * record with real PayPal evidence, then runs the AI recovery analysis.
+ *
+ * This is the bridge between PayPal and the AI engine:
+ *   PayPal Order → Authoritative Evidence → AI Analysis → Recovery Recommendation
+ *
+ * The AI receives the actual PayPal status as evidence — it never invents it.
+ * The deterministic verifier still controls execution after this analysis.
+ */
+export async function analyzePayPalTransaction(
+  db: Db,
+  userId: string,
+  paypalOrderId: string,
+  rules: import("./recovery-engine").MerchantRules,
+): Promise<PayPalAnalysisResult> {
+  // 1. Fetch authoritative PayPal order status — never trust stored state.
+  const liveOrder = await getPayPalOrder(paypalOrderId);
+
+  // 2. Load our internal PayPal order record to get the linked transaction.
+  const { data: orderRecord, error: orderErr } = await db
+    .from("paypal_orders")
+    .select("transaction_id, case_id, amount, currency")
+    .eq("paypal_order_id", paypalOrderId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (orderErr) fail("Could not load the PayPal order record.");
+  if (!orderRecord) fail("PayPal order not found or does not belong to your account.");
+
+  // 3. Update our stored order status with the live PayPal status.
+  await db
+    .from("paypal_orders")
+    .update({ status: liveOrder.status })
+    .eq("paypal_order_id", paypalOrderId)
+    .eq("user_id", userId);
+
+  // 4. Map PayPal status to internal failure reason for the AI engine.
+  //    The AI receives real PayPal evidence, not invented context.
+  const paypalStatusMap: Record<string, { failureReason: string; txStatus: string }> = {
+    CREATED: { failureReason: "checkout_abandoned", txStatus: "ABANDONED" },
+    SAVED: { failureReason: "checkout_abandoned", txStatus: "ABANDONED" },
+    APPROVED: { failureReason: "network_error", txStatus: "FAILED" },
+    VOIDED: { failureReason: "bank_declined", txStatus: "FAILED" },
+    PAYER_ACTION_REQUIRED: { failureReason: "authentication_failed", txStatus: "FAILED" },
+    COMPLETED: { failureReason: null as unknown as string, txStatus: "SUCCESS" },
+  };
+
+  const mapped = paypalStatusMap[liveOrder.status] ?? {
+    failureReason: "unknown",
+    txStatus: "FAILED",
+  };
+
+  // 5. Update the internal transaction with real PayPal evidence.
+  await db
+    .from("transactions")
+    .update({
+      failure_reason: mapped.failureReason,
+      status: mapped.txStatus,
+    })
+    .eq("id", orderRecord.transaction_id)
+    .eq("user_id", userId);
+
+  // 6. Run the existing AI analysis pipeline with the enriched transaction.
+  const { analyzeCase } = await import("./agent.server");
+  let caseId = orderRecord.case_id;
+
+  // If no case exists for this transaction, create one.
+  if (!caseId) {
+    const { data: existingCase } = await db
+      .from("recovery_cases")
+      .select("id")
+      .eq("transaction_id", orderRecord.transaction_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    caseId = existingCase?.id ?? null;
+
+    if (!caseId) {
+      // Create a recovery case for this PayPal transaction.
+      const { data: newCase, error: caseErr } = await db
+        .from("recovery_cases")
+        .insert({
+          user_id: userId,
+          transaction_id: orderRecord.transaction_id,
+          customer_id: (
+            await db
+              .from("transactions")
+              .select("customer_id")
+              .eq("id", orderRecord.transaction_id)
+              .single()
+          ).data!.customer_id,
+          amount_at_risk: Number(orderRecord.amount),
+          status: "open",
+          retry_count: 0,
+          reminder_count: 0,
+          reengagement_count: 0,
+          alt_method_count: 0,
+        })
+        .select("id")
+        .single();
+
+      if (caseErr || !newCase) fail("Could not create a recovery case for this PayPal transaction.");
+      caseId = newCase!.id;
+
+      // Link the PayPal order to the newly created case.
+      await db
+        .from("paypal_orders")
+        .update({ case_id: caseId })
+        .eq("paypal_order_id", paypalOrderId)
+        .eq("user_id", userId);
+    }
+  }
+
+  // 7. Run AI analysis — the AI will see the real PayPal-enriched transaction data.
+  const { decisionId, decision } = await analyzeCase(db, userId, caseId!, rules);
+
+  // 8. Write PayPal-specific audit event.
+  await writeAudit(db, userId, [
+    {
+      event_type: "PAYPAL_AI_ANALYSIS",
+      case_id: caseId,
+      actor: "paypal_recovery",
+      action: "ANALYZE_PAYPAL_TRANSACTION",
+      reason: `PayPal order ${paypalOrderId} status=${liveOrder.status} → AI recommended ${decision.recommended_action}`,
+      result: `${decision.recommended_action} @ ${decision.recovery_probability}% (${decision.source})`,
+    },
+  ]);
+
+  return {
+    paypalOrderId,
+    paypalStatus: liveOrder.status,
+    internalTransactionId: orderRecord.transaction_id,
+    internalCaseId: caseId,
+    decisionId,
+    decision: {
+      diagnosis: decision.diagnosis,
+      recovery_probability: decision.recovery_probability,
+      risk_level: decision.risk_level,
+      recommended_action: decision.recommended_action,
+      reason: decision.reason,
+      confidence: decision.confidence,
+      source: decision.source,
+    },
+    paypalEvidence: {
+      orderId: liveOrder.id,
+      status: liveOrder.status,
+      amount: Number(orderRecord.amount),
+      currency: orderRecord.currency,
+      payerApproved: liveOrder.status === "APPROVED" || liveOrder.status === "COMPLETED",
+    },
+  };
 }

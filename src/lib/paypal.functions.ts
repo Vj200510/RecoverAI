@@ -82,3 +82,19 @@ export const getPayPalOrderStatus = createServerFn({ method: "GET" })
     const { getPayPalOrder } = await import("./paypal.server");
     return getPayPalOrder(data.paypalOrderId);
   });
+
+// ─── Analyze PayPal transaction with AI engine ───────────────────────────────
+
+export const analyzePayPalTransaction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      paypalOrderId: z.string().min(1).max(100),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { analyzePayPalTransaction: analyze } = await import("./paypal-recovery.server");
+    const { loadRules } = await import("./workspace.server");
+    const rules = await loadRules(context.supabase, context.userId);
+    return analyze(context.supabase, context.userId, data.paypalOrderId, rules);
+  });

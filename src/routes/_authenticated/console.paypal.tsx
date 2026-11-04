@@ -52,6 +52,7 @@ import {
   checkPayPalStatus,
   createPayPalRecoveryOrder,
   getPayPalStats,
+  analyzePayPalTransaction,
 } from "@/lib/paypal.functions";
 
 const TITLE = "PayPal Integration — RecoverAI";
@@ -60,9 +61,11 @@ const DESCRIPTION =
 
 export const Route = createFileRoute("/_authenticated/console/paypal")({
   validateSearch: z.object({
-    order_id: z.string().optional(),
+    order_id: z.string().optional(), // our own param (legacy)
+    token: z.string().optional(),    // PayPal appends ?token=ORDER_ID on return
     transaction_id: z.string().optional(),
     cancelled: z.string().optional(),
+    PayerID: z.string().optional(),  // PayPal also appends PayerID
   }),
   head: () => ({
     meta: [
@@ -107,9 +110,11 @@ function PayPalPage() {
   const search = useSearch({ from: "/_authenticated/console/paypal" });
 
   const [transactionIdInput, setTransactionIdInput] = useState("");
+  const [analysisResult, setAnalysisResult] = useState<Awaited<ReturnType<typeof analyzePayPalTransaction>> | null>(null);
 
   // Handle return from PayPal checkout
-  const returnOrderId = search.order_id;
+  // PayPal appends ?token=ORDER_ID&PayerID=XXX to the return URL
+  const returnOrderId = search.token ?? search.order_id; // prefer PayPal's token param
   const returnTxId = search.transaction_id;
   const wasCancelled = search.cancelled === "true";
 
@@ -168,6 +173,22 @@ function PayPalPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [returnOrderId, wasCancelled]);
+
+  // ── Analyse PayPal order with AI engine ──────────────────────────────────
+
+  const analysisMutation = useMutation({
+    mutationFn: (paypalOrderId: string) =>
+      analyzePayPalTransaction({ data: { paypalOrderId } }),
+    onSuccess: (result) => {
+      setAnalysisResult(result);
+      toast.success(`AI analysis: ${result.decision.recommended_action} @ ${result.decision.recovery_probability}%`);
+      void qc.invalidateQueries({ queryKey: ["paypal-stats"] });
+      void qc.invalidateQueries({ queryKey: ["overview"] });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "AI analysis failed.");
+    },
+  });
 
   // ── Create order mutation ─────────────────────────────────────────────────
 
@@ -445,6 +466,45 @@ function PayPalPage() {
         </ul>
       </Panel>
 
+      {/* ── AI Analysis result ── */}
+      {analysisResult && (
+        <Panel title="AI recovery analysis" description="Based on authoritative PayPal transaction evidence">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted-foreground">PayPal status</p>
+              <p className="mt-1 font-semibold">{analysisResult.paypalStatus}</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted-foreground">Recommended action</p>
+              <p className="mt-1 font-semibold">{analysisResult.decision.recommended_action}</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted-foreground">Recovery probability</p>
+              <p className="num mt-1 font-semibold">{analysisResult.decision.recovery_probability}%</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted-foreground">Source</p>
+              <p className="mt-1 font-semibold">{analysisResult.decision.source === "ai" ? "AI agent" : "Rule-based"}</p>
+            </div>
+          </div>
+          <div className="mt-3 rounded-lg border border-border p-4 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Diagnosis</p>
+            <p className="text-sm">{analysisResult.decision.diagnosis}</p>
+            <p className="text-xs font-medium text-muted-foreground mt-2">Reason</p>
+            <p className="text-sm">{analysisResult.decision.reason}</p>
+          </div>
+          <div className="mt-3 rounded-lg border border-border p-3">
+            <p className="text-xs font-medium text-muted-foreground mb-2">PayPal evidence used</p>
+            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <div><span className="text-muted-foreground">Order ID: </span><span className="num font-medium">{analysisResult.paypalEvidence.orderId.slice(0,12)}…</span></div>
+              <div><span className="text-muted-foreground">Status: </span><span className="font-medium">{analysisResult.paypalEvidence.status}</span></div>
+              <div><span className="text-muted-foreground">Amount: </span><span className="num font-medium">{formatCurrencyPrecise(analysisResult.paypalEvidence.amount, analysisResult.paypalEvidence.currency)}</span></div>
+              <div><span className="text-muted-foreground">Payer approved: </span><span className="font-medium">{analysisResult.paypalEvidence.payerApproved ? "Yes" : "No"}</span></div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
       {/* ── Recent PayPal activity ── */}
       <Panel
         title="Recent PayPal orders"
@@ -474,6 +534,7 @@ function PayPalPage() {
                   <TableHead>Amount</TableHead>
                   <TableHead>Transaction</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead className="text-right">AI Analysis</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -491,6 +552,19 @@ function PayPalPage() {
                     </TableCell>
                     <TableCell className="num text-xs text-muted-foreground">
                       {formatDateTime(order.created_at)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={analysisMutation.isPending}
+                        onClick={() => analysisMutation.mutate(order.paypal_order_id)}
+                      >
+                        {analysisMutation.isPending && analysisMutation.variables === order.paypal_order_id ? (
+                          <Loader2 className="size-3 animate-spin" aria-hidden />
+                        ) : null}
+                        Analyse
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
