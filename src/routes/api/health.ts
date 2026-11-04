@@ -24,12 +24,17 @@ export const Route = createFileRoute("/api/health")({
 
         if (supabaseUrl && supabaseKey) {
           try {
-            // Lightweight REST ping — no auth, no data, just checks the API responds
+            // Lightweight REST ping — checks the Supabase API responds.
+            // Uses a short timeout so the health endpoint responds quickly.
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 3000);
             const res = await fetch(`${supabaseUrl}/rest/v1/`, {
               headers: { apikey: supabaseKey },
-              signal: AbortSignal.timeout(5000),
-            });
-            supabaseStatus = res.ok || res.status === 400 ? "connected" : "error";
+              signal: controller.signal,
+            }).finally(() => clearTimeout(timer));
+            // 200 OK = authed, 400 = malformed but alive, 401 = wrong key but alive
+            supabaseStatus =
+              res.ok || res.status === 400 || res.status === 401 ? "connected" : "error";
           } catch {
             supabaseStatus = "error";
           }
