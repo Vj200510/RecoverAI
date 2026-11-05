@@ -25,6 +25,8 @@ import {
   PayPalError,
 } from "./paypal.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { verifyAndCreateOrder, verifyAndCapture } from "./paypal-verifier.server";
+import type { PayPalVerificationResult } from "./paypal-verifier.server";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ export interface CreateRecoveryOrderResult {
   amount: number;
   currency: string;
   sandbox: boolean;
+  verification: PayPalVerificationResult;
 }
 
 export interface CaptureRecoveryOrderResult {
@@ -57,6 +60,7 @@ export interface CaptureRecoveryOrderResult {
   transactionId: string;
   caseId: string | null;
   alreadyCaptured: boolean;
+  verification: PayPalVerificationResult;
 }
 
 export interface PayPalDashboardStats {
@@ -82,11 +86,13 @@ export interface PayPalDashboardStats {
 /**
  * Creates a new PayPal order for a recovery checkout.
  *
- * Guards enforced here (in addition to the existing verifier):
- * - The internal transaction must exist and belong to the user.
- * - The transaction must NOT already be SUCCESS or RECOVERED.
- * - No pending/approved PayPal order may already exist for this transaction.
- * - Amount and currency are taken from the authoritative DB record, never from input.
+ * All execution guards are now enforced through verifyAndCreateOrder():
+ * - Transaction ownership (user_id filter on DB read)
+ * - Terminal transaction check (SUCCESS/RECOVERED → BLOCK)
+ * - Active order duplicate check → BLOCK
+ * - Mandatory audit before execution
+ * - runPayPalGate: BLOCK cannot reach the PayPal API
+ * - Amount/currency sourced from DB, never from client input
  */
 export async function createRecoveryOrder(
   db: Db,
@@ -94,119 +100,82 @@ export async function createRecoveryOrder(
   transactionId: string,
   baseUrl: string,
 ): Promise<CreateRecoveryOrderResult> {
-  // 1. Load authoritative transaction record.
-  const { data: tx, error: txError } = await db
-    .from("transactions")
-    .select("id, transaction_ref, amount, currency, status, recovery_status, customer_id")
-    .eq("id", transactionId)
-    .eq("user_id", userId)
-    .maybeSingle();
+  const { verification, gate } = await verifyAndCreateOrder(
+    db,
+    userId,
+    transactionId,
+    async (ev) => {
+      // This executor only runs when verification returns APPROVE.
+      const paypalOrder = await createPayPalOrder({
+        transactionRef: ev.transactionRef,
+        amount: ev.amount,
+        currency: ev.currency,
+        description: `RecoverAI payment recovery for transaction ${ev.transactionRef}`,
+        returnUrl: `${baseUrl}/console/paypal`,
+        cancelUrl: `${baseUrl}/console/paypal?cancelled=true`,
+      });
 
-  if (txError) fail("Could not load the transaction record.");
-  if (!tx) fail("Transaction not found.");
+      const approveUrl = getApproveUrl(paypalOrder);
+      if (!approveUrl) fail("PayPal did not return an approval URL. Please try again.");
 
-  // 2. Guard: do not create a new PayPal order for an already-successful payment.
-  if (["SUCCESS", "RECOVERED"].includes(tx.status.toUpperCase())) {
+      // Load customer_id for audit (need full tx record).
+      const { data: txFull } = await db
+        .from("transactions")
+        .select("customer_id, transaction_ref")
+        .eq("id", ev.transactionId)
+        .eq("user_id", userId)
+        .single();
+
+      const { data: inserted, error: insertError } = await db
+        .from("paypal_orders")
+        .insert({
+          user_id: userId,
+          transaction_id: ev.transactionId,
+          paypal_order_id: paypalOrder.id,
+          amount: ev.amount,
+          currency: ev.currency,
+          status: paypalOrder.status,
+          intent: paypalOrder.intent,
+          paypal_created_at: paypalOrder.create_time ?? null,
+          raw_response: paypalOrder as unknown as Json,
+        })
+        .select("id")
+        .single();
+
+      if (insertError || !inserted) {
+        fail("The PayPal order was created but could not be recorded. Contact support.");
+      }
+
+      await writeAudit(db, userId, [
+        {
+          event_type: "PAYPAL_ORDER_CREATED",
+          transaction_ref: txFull?.transaction_ref ?? ev.transactionRef,
+          customer_id: txFull?.customer_id ?? null,
+          actor: "paypal_recovery",
+          action: "CREATE_CHECKOUT_ORDER",
+          reason: `PayPal Sandbox recovery checkout for ${ev.currency} ${ev.amount.toFixed(2)}`,
+          result: `order_id=${paypalOrder.id} status=${paypalOrder.status}`,
+        },
+      ]);
+
+      return {
+        paypalOrderId: paypalOrder.id,
+        approveUrl: approveUrl!,
+        internalOrderId: inserted!.id,
+        amount: ev.amount,
+        currency: ev.currency,
+        sandbox: true,
+      };
+    },
+  );
+
+  if (!gate.executed) {
     fail(
-      `Cannot create a recovery order for a ${tx.status} transaction. The payment already succeeded.`,
+      `PayPal order creation blocked by verification: ${verification.reason}`,
     );
   }
 
-  // 3. Guard: check for existing active PayPal orders for this transaction.
-  const { data: existingOrders } = await db
-    .from("paypal_orders")
-    .select("paypal_order_id, status")
-    .eq("transaction_id", transactionId)
-    .eq("user_id", userId)
-    .in("status", ["CREATED", "SAVED", "APPROVED", "PAYER_ACTION_REQUIRED"]);
-
-  if (existingOrders && existingOrders.length > 0) {
-    const existing = existingOrders[0]!;
-    // Refresh the live status from PayPal before blocking.
-    try {
-      const live = await getPayPalOrder(existing.paypal_order_id);
-      if (live.status === "APPROVED" || live.status === "PAYER_ACTION_REQUIRED") {
-        fail(
-          `A PayPal order (${existing.paypal_order_id}) is already awaiting customer approval for this transaction.`,
-        );
-      }
-      // If it's COMPLETED or VOIDED, fall through and create a new one.
-      if (live.status !== "COMPLETED" && live.status !== "VOIDED") {
-        fail(
-          `An active PayPal order (${existing.paypal_order_id}) already exists with status ${live.status}.`,
-        );
-      }
-    } catch (err) {
-      if (err instanceof PayPalError && err.statusCode === 404) {
-        // Order no longer exists in PayPal; allow creating a new one.
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  // 4. Create the PayPal order using authoritative amount/currency from DB.
-  const amount = Number(tx.amount);
-  const currency = tx.currency;
-
-  const paypalOrder = await createPayPalOrder({
-    transactionRef: tx.transaction_ref,
-    amount,
-    currency,
-    description: `RecoverAI payment recovery for transaction ${tx.transaction_ref}`,
-    // PayPal appends ?token=ORDER_ID to the return URL automatically.
-    // The console.paypal page reads search.order_id OR search.token on return.
-    returnUrl: `${baseUrl}/console/paypal`,
-    cancelUrl: `${baseUrl}/console/paypal?cancelled=true`,
-  });
-
-  const approveUrl = getApproveUrl(paypalOrder);
-  if (!approveUrl) {
-    fail("PayPal did not return an approval URL. Please try again.");
-  }
-
-  // 5. Store the PayPal order in our database.
-  const { data: inserted, error: insertError } = await db
-    .from("paypal_orders")
-    .insert({
-      user_id: userId,
-      transaction_id: transactionId,
-      paypal_order_id: paypalOrder.id,
-      amount,
-      currency,
-      status: paypalOrder.status,
-      intent: paypalOrder.intent,
-      paypal_created_at: paypalOrder.create_time ?? null,
-      raw_response: paypalOrder as unknown as Json,
-    })
-    .select("id")
-    .single();
-
-  if (insertError || !inserted) {
-    fail("The PayPal order was created but could not be recorded. Contact support.");
-  }
-
-  // 6. Audit.
-  await writeAudit(db, userId, [
-    {
-      event_type: "PAYPAL_ORDER_CREATED",
-      transaction_ref: tx.transaction_ref,
-      customer_id: tx.customer_id,
-      actor: "paypal_recovery",
-      action: "CREATE_CHECKOUT_ORDER",
-      reason: `PayPal Sandbox recovery checkout for ${currency} ${amount.toFixed(2)}`,
-      result: `order_id=${paypalOrder.id} status=${paypalOrder.status}`,
-    },
-  ]);
-
-  return {
-    paypalOrderId: paypalOrder.id,
-    approveUrl: approveUrl!,
-    internalOrderId: inserted.id,
-    amount,
-    currency,
-    sandbox: true,
-  };
+  return { ...gate.result!, verification };
 }
 
 // ─── Capture an approved PayPal order ────────────────────────────────────────
@@ -214,175 +183,151 @@ export async function createRecoveryOrder(
 /**
  * Captures a customer-approved PayPal order.
  *
- * Guards:
- * - Loads the PayPal order from our DB (no orphan captures).
- * - Verifies the order belongs to the authenticated user's transaction.
- * - Fetches live PayPal status before capturing (never trusts frontend).
- * - Prevents duplicate capture via DB unique constraint on paypal_capture_id.
- * - Verifies amount and currency against the DB record.
- * - Updates the internal transaction and recovery case on success.
- * - Full audit trail throughout.
+ * All execution guards are now enforced through verifyAndCapture():
+ * - Order ownership (user_id filter on DB read)
+ * - Live PayPal status fetched before evaluation (never trusts stored/client status)
+ * - Idempotency: existing capture record → APPROVE with alreadyCaptured=true
+ * - Terminal transaction check → BLOCK
+ * - PayPal order must be APPROVED → else BLOCK
+ * - Amount and currency must match stored record exactly → else BLOCK
+ * - Mandatory audit before execution
+ * - runPayPalGate: BLOCK cannot reach the PayPal capture API
  */
 export async function captureRecoveryOrder(
   db: Db,
   userId: string,
   paypalOrderId: string,
 ): Promise<CaptureRecoveryOrderResult> {
-  // 1. Load our internal PayPal order record.
-  const { data: orderRecord, error: orderError } = await db
-    .from("paypal_orders")
-    .select("*, transactions!inner(transaction_ref, amount, currency, customer_id, status)")
-    .eq("paypal_order_id", paypalOrderId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (orderError) fail("Could not load the PayPal order record.");
-  if (!orderRecord) fail("PayPal order not found or does not belong to your account.");
-
-  const tx = orderRecord.transactions as unknown as {
-    transaction_ref: string;
-    amount: number;
-    currency: string;
-    customer_id: string;
-    status: string;
-  };
-
-  // 2. Guard: already completed — idempotent success.
-  if (orderRecord.status === "COMPLETED") {
-    const { data: existingCapture } = await db
-      .from("paypal_captures")
-      .select("paypal_capture_id, status, amount")
-      .eq("paypal_order_id", paypalOrderId)
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    return {
-      paypalOrderId,
-      captureId: existingCapture?.paypal_capture_id ?? "already-captured",
-      status: "COMPLETED",
-      amount: Number(orderRecord.amount),
-      currency: orderRecord.currency,
-      transactionId: orderRecord.transaction_id,
-      caseId: orderRecord.case_id,
-      alreadyCaptured: true,
-    };
-  }
-
-  // 2b. Guard: transaction already RECOVERED — prevent duplicate payment.
-  if (["SUCCESS", "RECOVERED"].includes(tx.status.toUpperCase())) {
-    fail(
-      `This transaction is already ${tx.status}. Capturing an already-paid transaction is not permitted.`,
-    );
-  }
-
-  // 3. Check for existing capture record (DB-level idempotency).
-  const { data: existingCaptures } = await db
-    .from("paypal_captures")
-    .select("paypal_capture_id, status")
-    .eq("paypal_order_id", paypalOrderId)
-    .eq("user_id", userId);
-
-  if (existingCaptures && existingCaptures.length > 0) {
-    const cap = existingCaptures[0]!;
-    return {
-      paypalOrderId,
-      captureId: cap.paypal_capture_id,
-      status: cap.status,
-      amount: Number(orderRecord.amount),
-      currency: orderRecord.currency,
-      transactionId: orderRecord.transaction_id,
-      caseId: orderRecord.case_id,
-      alreadyCaptured: true,
-    };
-  }
-
-  // 4. Capture (includes live status re-check + amount/currency verification).
-  const { capture, order: capturedOrder } = await capturePayPalOrder(
+  const { verification, gate } = await verifyAndCapture(
+    db,
+    userId,
     paypalOrderId,
-    Number(orderRecord.amount),
-    orderRecord.currency,
+    async (ev, liveOrder) => {
+      // This executor only runs when verification returns APPROVE.
+
+      // Idempotent return for already-captured orders.
+      if (ev.orderCompleted || ev.existingCaptureId) {
+        // Load order record for response fields.
+        const { data: ord } = await db
+          .from("paypal_orders")
+          .select("transaction_id, case_id, amount, currency")
+          .eq("paypal_order_id", paypalOrderId)
+          .eq("user_id", userId)
+          .single();
+
+        return {
+          paypalOrderId,
+          captureId: ev.existingCaptureId ?? "already-captured",
+          status: "COMPLETED",
+          amount: ev.storedAmount,
+          currency: ev.storedCurrency,
+          transactionId: ord?.transaction_id ?? "",
+          caseId: ord?.case_id ?? null,
+          alreadyCaptured: true,
+        };
+      }
+
+      // Execute the actual PayPal capture.
+      const { capture, order: capturedOrder } = await capturePayPalOrder(
+        paypalOrderId,
+        ev.storedAmount,
+        ev.storedCurrency,
+      );
+
+      const captureStatus = capture.status;
+      const captureAmount = parseFloat(capture.amount.value);
+
+      // Load order record for transaction/case IDs.
+      const { data: orderRecord } = await db
+        .from("paypal_orders")
+        .select("transaction_id, case_id, transactions!inner(transaction_ref, customer_id)")
+        .eq("paypal_order_id", paypalOrderId)
+        .eq("user_id", userId)
+        .single();
+
+      const txInfo = orderRecord?.transactions as unknown as
+        | { transaction_ref: string; customer_id: string }
+        | undefined;
+
+      // Record the capture.
+      await db.from("paypal_captures").insert({
+        user_id: userId,
+        paypal_order_id: paypalOrderId,
+        transaction_id: orderRecord?.transaction_id ?? "",
+        case_id: orderRecord?.case_id ?? null,
+        paypal_capture_id: capture.id,
+        status: captureStatus,
+        amount: captureAmount,
+        currency: capture.amount.currency_code,
+        final_capture: capture.final_capture,
+        seller_protection: capture.seller_protection?.status ?? null,
+        raw_response: capture as unknown as Json,
+      });
+
+      // Update the stored PayPal order status.
+      await db
+        .from("paypal_orders")
+        .update({
+          status: capturedOrder.status,
+          raw_response: capturedOrder as unknown as Json,
+        })
+        .eq("paypal_order_id", paypalOrderId)
+        .eq("user_id", userId);
+
+      const isSuccess = captureStatus === "COMPLETED";
+
+      if (isSuccess && orderRecord) {
+        await db
+          .from("transactions")
+          .update({ status: "RECOVERED", recovery_status: "recovered" })
+          .eq("id", orderRecord.transaction_id)
+          .eq("user_id", userId);
+
+        if (orderRecord.case_id) {
+          await db
+            .from("recovery_cases")
+            .update({
+              status: "recovered",
+              recovered_amount: captureAmount,
+              recovered_at: new Date().toISOString(),
+              stop_reason: "PAYMENT_SUCCEEDED",
+            })
+            .eq("id", orderRecord.case_id)
+            .eq("user_id", userId);
+        }
+      }
+
+      await writeAudit(db, userId, [
+        {
+          event_type: isSuccess ? "PAYPAL_CAPTURE_COMPLETED" : "PAYPAL_CAPTURE_FAILED",
+          transaction_ref: txInfo?.transaction_ref ?? null,
+          customer_id: txInfo?.customer_id ?? null,
+          case_id: orderRecord?.case_id ?? null,
+          actor: "paypal_recovery",
+          action: "CAPTURE_ORDER",
+          reason: `PayPal capture for order ${paypalOrderId}`,
+          result: `capture_id=${capture.id} status=${captureStatus} amount=${captureAmount} ${ev.storedCurrency}`,
+        },
+      ]);
+
+      return {
+        paypalOrderId,
+        captureId: capture.id,
+        status: captureStatus,
+        amount: captureAmount,
+        currency: ev.storedCurrency,
+        transactionId: orderRecord?.transaction_id ?? "",
+        caseId: orderRecord?.case_id ?? null,
+        alreadyCaptured: false,
+      };
+    },
   );
 
-  const captureStatus = capture.status;
-  const captureAmount = parseFloat(capture.amount.value);
-
-  // 5. Record the capture.
-  await db.from("paypal_captures").insert({
-    user_id: userId,
-    paypal_order_id: paypalOrderId,
-    transaction_id: orderRecord.transaction_id,
-    case_id: orderRecord.case_id,
-    paypal_capture_id: capture.id,
-    status: captureStatus,
-    amount: captureAmount,
-    currency: capture.amount.currency_code,
-    final_capture: capture.final_capture,
-    seller_protection: capture.seller_protection?.status ?? null,
-    raw_response: capture as unknown as Json,
-  });
-
-  // 6. Update our PayPal order status.
-  await db
-    .from("paypal_orders")
-    .update({
-      status: capturedOrder.status,
-      raw_response: capturedOrder as unknown as Json,
-    })
-    .eq("paypal_order_id", paypalOrderId)
-    .eq("user_id", userId);
-
-  const isSuccess = captureStatus === "COMPLETED";
-
-  // 7. Update the internal transaction record if capture succeeded.
-  if (isSuccess) {
-    await db
-      .from("transactions")
-      .update({
-        status: "RECOVERED",
-        recovery_status: "recovered",
-      })
-      .eq("id", orderRecord.transaction_id)
-      .eq("user_id", userId);
-
-    // Update the recovery case if linked.
-    if (orderRecord.case_id) {
-      await db
-        .from("recovery_cases")
-        .update({
-          status: "recovered",
-          recovered_amount: captureAmount,
-          recovered_at: new Date().toISOString(),
-          stop_reason: "PAYMENT_SUCCEEDED",
-        })
-        .eq("id", orderRecord.case_id)
-        .eq("user_id", userId);
-    }
+  if (!gate.executed) {
+    fail(`PayPal capture blocked by verification: ${verification.reason}`);
   }
 
-  // 8. Audit.
-  await writeAudit(db, userId, [
-    {
-      event_type: isSuccess ? "PAYPAL_CAPTURE_COMPLETED" : "PAYPAL_CAPTURE_FAILED",
-      transaction_ref: tx.transaction_ref,
-      customer_id: tx.customer_id,
-      case_id: orderRecord.case_id,
-      actor: "paypal_recovery",
-      action: "CAPTURE_ORDER",
-      reason: `PayPal capture for order ${paypalOrderId}`,
-      result: `capture_id=${capture.id} status=${captureStatus} amount=${captureAmount} ${orderRecord.currency}`,
-    },
-  ]);
-
-  return {
-    paypalOrderId,
-    captureId: capture.id,
-    status: captureStatus,
-    amount: captureAmount,
-    currency: orderRecord.currency,
-    transactionId: orderRecord.transaction_id,
-    caseId: orderRecord.case_id,
-    alreadyCaptured: false,
-  };
+  return { ...gate.result!, verification };
 }
 
 // ─── Dashboard stats ──────────────────────────────────────────────────────────

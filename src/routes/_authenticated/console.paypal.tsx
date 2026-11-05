@@ -146,8 +146,7 @@ function PayPalPage() {
         );
       } else {
         toast.warning(`Capture status: ${result.status}. Check the activity table below.`);
-      }
-      await qc.invalidateQueries({ queryKey: ["paypal-stats"] });
+      }      await qc.invalidateQueries({ queryKey: ["paypal-stats"] });
       await qc.invalidateQueries({ queryKey: ["overview"] });
       await qc.invalidateQueries({ queryKey: ["transactions"] });
       // Remove query params after processing.
@@ -346,6 +345,24 @@ function PayPalPage() {
               : `Capture: ${captureResult.status}`
           }
         >
+          {/* Verification decision — shown prominently */}
+          <div className={`mb-4 flex items-start gap-3 rounded-lg border p-3 ${
+            captureResult.verification?.decision === "APPROVE"
+              ? "border-success/30 bg-success/10"
+              : "border-destructive/30 bg-destructive/10"
+          }`}>
+            {captureResult.verification?.decision === "APPROVE" ? (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+            ) : (
+              <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+            )}
+            <div>
+              <p className="text-xs font-semibold">
+                Verification: {captureResult.verification?.decision ?? "UNKNOWN"}
+              </p>
+              <p className="text-xs text-muted-foreground">{captureResult.verification?.reason}</p>
+            </div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-border p-3">
               <p className="text-xs text-muted-foreground">PayPal order</p>
