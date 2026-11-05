@@ -132,6 +132,7 @@ function buildPayPalDb() {
 
 // ── Mock PayPal HTTP calls ────────────────────────────────────────────────────
 
+// eslint-disable-next-line prefer-const -- reassigned inside async test closures
 let mockPayPalOrderStatus = "APPROVED";
 const originalFetch = globalThis.fetch;
 
@@ -145,19 +146,33 @@ function mockPayPal() {
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (url.includes("/v2/checkout/orders") && !url.includes("/capture") && init?.method !== "POST") {
+    if (
+      url.includes("/v2/checkout/orders") &&
+      !url.includes("/capture") &&
+      init?.method !== "POST"
+    ) {
       return new Response(
         JSON.stringify({
           id: "MOCK-ORDER-001",
           status: mockPayPalOrderStatus,
           intent: "CAPTURE",
           purchase_units: [{ amount: { currency_code: "USD", value: "100.00" } }],
-          links: [{ href: "https://sandbox.paypal.com/approve?token=MOCK-ORDER-001", rel: "approve", method: "GET" }],
+          links: [
+            {
+              href: "https://sandbox.paypal.com/approve?token=MOCK-ORDER-001",
+              rel: "approve",
+              method: "GET",
+            },
+          ],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
-    if (url.includes("/v2/checkout/orders") && init?.method === "POST" && !url.includes("/capture")) {
+    if (
+      url.includes("/v2/checkout/orders") &&
+      init?.method === "POST" &&
+      !url.includes("/capture")
+    ) {
       return new Response(
         JSON.stringify({
           id: "MOCK-ORDER-NEW",
@@ -174,11 +189,20 @@ function mockPayPal() {
         JSON.stringify({
           id: "MOCK-ORDER-001",
           status: "COMPLETED",
-          purchase_units: [{
-            payments: {
-              captures: [{ id: "MOCK-CAP-001", status: "COMPLETED", amount: { currency_code: "USD", value: "100.00" }, final_capture: true }],
+          purchase_units: [
+            {
+              payments: {
+                captures: [
+                  {
+                    id: "MOCK-CAP-001",
+                    status: "COMPLETED",
+                    amount: { currency_code: "USD", value: "100.00" },
+                    final_capture: true,
+                  },
+                ],
+              },
             },
-          }],
+          ],
           links: [],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -250,150 +274,165 @@ await check("PAYPAL-BOUND-02 createRecoveryOrder blocked for RECOVERED transacti
 });
 
 // ── PAYPAL-BOUND-03: captureRecoveryOrder blocked for RECOVERED transaction ───
-await check("PAYPAL-BOUND-03 captureRecoveryOrder blocked when transaction is RECOVERED", async () => {
-  const f = buildPayPalDb();
-  // Seed a PayPal order linked to this transaction
-  f.tables["paypal_orders"]!.push({
-    id: "internal-order-id",
-    user_id: f.userId,
-    paypal_order_id: "MOCK-ORDER-001",
-    transaction_id: f.transactionId,
-    case_id: null,
-    amount: 100,
-    currency: "USD",
-    status: "APPROVED",
-  });
-  // Mark transaction as already recovered
-  f.tables["transactions"]![0]!["status"] = "RECOVERED";
+await check(
+  "PAYPAL-BOUND-03 captureRecoveryOrder blocked when transaction is RECOVERED",
+  async () => {
+    const f = buildPayPalDb();
+    // Seed a PayPal order linked to this transaction
+    f.tables["paypal_orders"]!.push({
+      id: "internal-order-id",
+      user_id: f.userId,
+      paypal_order_id: "MOCK-ORDER-001",
+      transaction_id: f.transactionId,
+      case_id: null,
+      amount: 100,
+      currency: "USD",
+      status: "APPROVED",
+    });
+    // Mark transaction as already recovered
+    f.tables["transactions"]![0]!["status"] = "RECOVERED";
 
-  mockPayPalOrderStatus = "APPROVED";
-  await assert.rejects(
-    () => captureRecoveryOrder(f.db, f.userId, "MOCK-ORDER-001"),
-    (err) => {
-      assert.ok(err instanceof AppError);
-      assert.match(err.message, /already|RECOVERED|SUCCESS/i);
-      return true;
-    },
-  );
-  assert.equal(f.tables["paypal_captures"]!.length, 0, "No captures for recovered transaction");
-});
+    mockPayPalOrderStatus = "APPROVED";
+    await assert.rejects(
+      () => captureRecoveryOrder(f.db, f.userId, "MOCK-ORDER-001"),
+      (err) => {
+        assert.ok(err instanceof AppError);
+        assert.match(err.message, /already|RECOVERED|SUCCESS/i);
+        return true;
+      },
+    );
+    assert.equal(f.tables["paypal_captures"]!.length, 0, "No captures for recovered transaction");
+  },
+);
 
 // ── PAYPAL-BOUND-04: captureRecoveryOrder idempotent for COMPLETED order ──────
-await check("PAYPAL-BOUND-04 captureRecoveryOrder returns alreadyCaptured for COMPLETED order", async () => {
-  const f = buildPayPalDb();
-  f.tables["paypal_orders"]!.push({
-    id: "internal-order-id",
-    user_id: f.userId,
-    paypal_order_id: "MOCK-ORDER-001",
-    transaction_id: f.transactionId,
-    case_id: null,
-    amount: 100,
-    currency: "USD",
-    status: "COMPLETED", // already done
-  });
-  f.tables["paypal_captures"]!.push({
-    id: "internal-cap-id",
-    user_id: f.userId,
-    paypal_order_id: "MOCK-ORDER-001",
-    paypal_capture_id: "MOCK-CAP-001",
-    status: "COMPLETED",
-    amount: 100,
-    currency: "USD",
-  });
+await check(
+  "PAYPAL-BOUND-04 captureRecoveryOrder returns alreadyCaptured for COMPLETED order",
+  async () => {
+    const f = buildPayPalDb();
+    f.tables["paypal_orders"]!.push({
+      id: "internal-order-id",
+      user_id: f.userId,
+      paypal_order_id: "MOCK-ORDER-001",
+      transaction_id: f.transactionId,
+      case_id: null,
+      amount: 100,
+      currency: "USD",
+      status: "COMPLETED", // already done
+    });
+    f.tables["paypal_captures"]!.push({
+      id: "internal-cap-id",
+      user_id: f.userId,
+      paypal_order_id: "MOCK-ORDER-001",
+      paypal_capture_id: "MOCK-CAP-001",
+      status: "COMPLETED",
+      amount: 100,
+      currency: "USD",
+    });
 
-  const result = await captureRecoveryOrder(f.db, f.userId, "MOCK-ORDER-001");
-  assert.equal(result.alreadyCaptured, true);
-  assert.equal(result.status, "COMPLETED");
-  // Should NOT have created a new capture record
-  assert.equal(f.tables["paypal_captures"]!.length, 1, "No new capture record created");
-});
+    const result = await captureRecoveryOrder(f.db, f.userId, "MOCK-ORDER-001");
+    assert.equal(result.alreadyCaptured, true);
+    assert.equal(result.status, "COMPLETED");
+    // Should NOT have created a new capture record
+    assert.equal(f.tables["paypal_captures"]!.length, 1, "No new capture record created");
+  },
+);
 
 // ── PAYPAL-BOUND-05: captureRecoveryOrder idempotent via existing capture ─────
-await check("PAYPAL-BOUND-05 captureRecoveryOrder idempotent when capture record exists", async () => {
-  const f = buildPayPalDb();
-  f.tables["paypal_orders"]!.push({
-    id: "internal-order-id",
-    user_id: f.userId,
-    paypal_order_id: "MOCK-ORDER-001",
-    transaction_id: f.transactionId,
-    case_id: null,
-    amount: 100,
-    currency: "USD",
-    status: "APPROVED",
-  });
-  // Capture already exists in DB
-  f.tables["paypal_captures"]!.push({
-    id: "internal-cap-id",
-    user_id: f.userId,
-    paypal_order_id: "MOCK-ORDER-001",
-    paypal_capture_id: "EXISTING-CAP-001",
-    status: "COMPLETED",
-    amount: 100,
-    currency: "USD",
-  });
+await check(
+  "PAYPAL-BOUND-05 captureRecoveryOrder idempotent when capture record exists",
+  async () => {
+    const f = buildPayPalDb();
+    f.tables["paypal_orders"]!.push({
+      id: "internal-order-id",
+      user_id: f.userId,
+      paypal_order_id: "MOCK-ORDER-001",
+      transaction_id: f.transactionId,
+      case_id: null,
+      amount: 100,
+      currency: "USD",
+      status: "APPROVED",
+    });
+    // Capture already exists in DB
+    f.tables["paypal_captures"]!.push({
+      id: "internal-cap-id",
+      user_id: f.userId,
+      paypal_order_id: "MOCK-ORDER-001",
+      paypal_capture_id: "EXISTING-CAP-001",
+      status: "COMPLETED",
+      amount: 100,
+      currency: "USD",
+    });
 
-  mockPayPalOrderStatus = "APPROVED";
-  const result = await captureRecoveryOrder(f.db, f.userId, "MOCK-ORDER-001");
-  assert.equal(result.alreadyCaptured, true);
-  assert.equal(result.captureId, "EXISTING-CAP-001");
-  assert.equal(f.tables["paypal_captures"]!.length, 1, "No duplicate capture created");
-});
+    mockPayPalOrderStatus = "APPROVED";
+    const result = await captureRecoveryOrder(f.db, f.userId, "MOCK-ORDER-001");
+    assert.equal(result.alreadyCaptured, true);
+    assert.equal(result.captureId, "EXISTING-CAP-001");
+    assert.equal(f.tables["paypal_captures"]!.length, 1, "No duplicate capture created");
+  },
+);
 
 // ── PAYPAL-BOUND-06: analyzePayPalTransaction blocked for COMPLETED ───────────
-await check("PAYPAL-BOUND-06 analyzePayPalTransaction blocked for COMPLETED PayPal order", async () => {
-  const f = buildPayPalDb();
-  f.tables["paypal_orders"]!.push({
-    id: "internal-order-id",
-    user_id: f.userId,
-    paypal_order_id: "MOCK-ORDER-001",
-    transaction_id: f.transactionId,
-    case_id: null,
-    amount: 100,
-    currency: "USD",
-    status: "APPROVED",
-  });
+await check(
+  "PAYPAL-BOUND-06 analyzePayPalTransaction blocked for COMPLETED PayPal order",
+  async () => {
+    const f = buildPayPalDb();
+    f.tables["paypal_orders"]!.push({
+      id: "internal-order-id",
+      user_id: f.userId,
+      paypal_order_id: "MOCK-ORDER-001",
+      transaction_id: f.transactionId,
+      case_id: null,
+      amount: 100,
+      currency: "USD",
+      status: "APPROVED",
+    });
 
-  // Make PayPal return COMPLETED status
-  mockPayPalOrderStatus = "COMPLETED";
+    // Make PayPal return COMPLETED status
+    mockPayPalOrderStatus = "COMPLETED";
 
-  const { DEFAULT_RULES } = await import("../src/lib/recovery-engine.js");
-  await assert.rejects(
-    () => analyzePayPalTransaction(f.db, f.userId, "MOCK-ORDER-001", DEFAULT_RULES),
-    (err) => {
-      assert.ok(err instanceof AppError);
-      assert.match(err.message, /COMPLETED|already|succeeded/i);
-      return true;
-    },
-  );
-  mockPayPalOrderStatus = "APPROVED";
-});
+    const { DEFAULT_RULES } = await import("../src/lib/recovery-engine.js");
+    await assert.rejects(
+      () => analyzePayPalTransaction(f.db, f.userId, "MOCK-ORDER-001", DEFAULT_RULES),
+      (err) => {
+        assert.ok(err instanceof AppError);
+        assert.match(err.message, /COMPLETED|already|succeeded/i);
+        return true;
+      },
+    );
+    mockPayPalOrderStatus = "APPROVED";
+  },
+);
 
 // ── PAYPAL-BOUND-07: createRecoveryOrder blocked when active order exists ──────
-await check("PAYPAL-BOUND-07 createRecoveryOrder blocked when active PayPal order exists", async () => {
-  const f = buildPayPalDb();
-  // Seed an existing active order
-  f.tables["paypal_orders"]!.push({
-    id: "existing-order-id",
-    user_id: f.userId,
-    paypal_order_id: "MOCK-ORDER-001",
-    transaction_id: f.transactionId,
-    case_id: null,
-    amount: 100,
-    currency: "USD",
-    status: "APPROVED", // active
-  });
+await check(
+  "PAYPAL-BOUND-07 createRecoveryOrder blocked when active PayPal order exists",
+  async () => {
+    const f = buildPayPalDb();
+    // Seed an existing active order
+    f.tables["paypal_orders"]!.push({
+      id: "existing-order-id",
+      user_id: f.userId,
+      paypal_order_id: "MOCK-ORDER-001",
+      transaction_id: f.transactionId,
+      case_id: null,
+      amount: 100,
+      currency: "USD",
+      status: "APPROVED", // active
+    });
 
-  mockPayPalOrderStatus = "APPROVED";
-  await assert.rejects(
-    () => createRecoveryOrder(f.db, f.userId, f.transactionId, "https://example.com"),
-    (err) => {
-      assert.ok(err instanceof AppError);
-      assert.match(err.message, /already.*approval|active.*order/i);
-      return true;
-    },
-  );
-  assert.equal(f.tables["paypal_orders"]!.length, 1, "No second order created");
-});
+    mockPayPalOrderStatus = "APPROVED";
+    await assert.rejects(
+      () => createRecoveryOrder(f.db, f.userId, f.transactionId, "https://example.com"),
+      (err) => {
+        assert.ok(err instanceof AppError);
+        assert.match(err.message, /already.*approval|active.*order/i);
+        return true;
+      },
+    );
+    assert.equal(f.tables["paypal_orders"]!.length, 1, "No second order created");
+  },
+);
 
 restoreFetch();
 console.log(`\nPayPal boundary tests: ${passed} passed, ${failed} failed`);

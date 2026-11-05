@@ -29,6 +29,7 @@ import assert from "node:assert/strict";
 // ── Minimal stubs so we can test the logic without real network calls ──────────
 
 let mockOrderStatus = "APPROVED";
+// eslint-disable-next-line prefer-const -- value is read but not reassigned; kept as let for symmetry with mockOrderStatus
 let mockCaptureStatus = "COMPLETED";
 let fetchCallCount = 0;
 let lastFetchPath = "";
