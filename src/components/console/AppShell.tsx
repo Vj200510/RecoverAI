@@ -108,7 +108,8 @@ export function AppShell({
         </div>
         <div className="border-t border-sidebar-border px-4 py-4">
           <p className="text-[0.7rem] text-muted-foreground">
-            Simulation environment. Recovery outcomes are modelled on synthetic payment data.
+            PayPal Sandbox environment. Recovery outcomes for existing cases use deterministic simulation.
+            Real PayPal checkout and capture available via the PayPal Recovery page.
           </p>
         </div>
       </aside>

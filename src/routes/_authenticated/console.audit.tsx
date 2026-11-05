@@ -49,9 +49,9 @@ export const Route = createFileRoute("/_authenticated/console/audit")({
   component: AuditPage,
 });
 
-// Values must match the event_type strings written by the recovery engine.
 const EVENT_TYPES = [
   "all",
+  // Recovery engine events
   "CASE_CREATED",
   "AI_ANALYSIS_COMPLETED",
   "RECOVERY_ACTION_SELECTED",
@@ -66,6 +66,16 @@ const EVENT_TYPES = [
   "EXECUTION_BLOCKED",
   "STOPPING_RULE_TRIGGERED",
   "ESCALATED",
+  // PayPal events
+  "PAYPAL_ORDER_CREATED",
+  "PAYPAL_ORDER_CREATION_APPROVED",
+  "PAYPAL_ORDER_CREATION_BLOCKED",
+  "PAYPAL_CAPTURE_APPROVED",
+  "PAYPAL_CAPTURE_BLOCKED",
+  "PAYPAL_CAPTURE_COMPLETED",
+  "PAYPAL_CAPTURE_FAILED",
+  "PAYPAL_AI_ANALYSIS",
+  // System events
   "DATA_RESET",
   "SETTINGS_UPDATED",
 ];

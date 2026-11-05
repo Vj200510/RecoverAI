@@ -224,17 +224,20 @@ function PayPalPage() {
         title="PayPal Sandbox integration"
         description="Real PayPal Sandbox checkout and capture — no simulated responses."
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void qc.invalidateQueries({ queryKey: ["paypal-stats"] });
-              void qc.invalidateQueries({ queryKey: ["paypal-status"] });
-            }}
-          >
-            <RefreshCw className="size-4" aria-hidden />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Pill tone="warning">SANDBOX</Pill>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void qc.invalidateQueries({ queryKey: ["paypal-stats"] });
+                void qc.invalidateQueries({ queryKey: ["paypal-status"] });
+              }}
+            >
+              <RefreshCw className="size-4" aria-hidden />
+              Refresh
+            </Button>
+          </div>
         }
       />
 
@@ -486,7 +489,11 @@ function PayPalPage() {
       {/* ── AI Analysis result ── */}
       {analysisResult && (
         <Panel title="AI recovery analysis" description="Based on authoritative PayPal transaction evidence">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Important: AI recommendation is NOT authorization */}
+          <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs text-warning-foreground">
+            <span className="font-semibold">Note:</span> This is an AI recommendation, not an execution authorization.
+            All recovery actions must still pass deterministic verification before execution.
+          </div>          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-lg border border-border p-3">
               <p className="text-xs text-muted-foreground">PayPal status</p>
               <p className="mt-1 font-semibold">{analysisResult.paypalStatus}</p>

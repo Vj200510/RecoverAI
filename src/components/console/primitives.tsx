@@ -162,9 +162,14 @@ export function toneForStatus(status: string): Tone {
     case "SUCCESS":
     case "RECOVERED":
     case "RECOVERY_SUCCEEDED":
+    case "ACTION_GROUNDING_APPROVED":
+    case "PAYPAL_CAPTURE_COMPLETED":
+    case "PAYPAL_CAPTURE_APPROVED":
+    case "PAYPAL_ORDER_CREATION_APPROVED":
       return "success";
     case "FAILED":
     case "RECOVERY_FAILED":
+    case "PAYPAL_CAPTURE_FAILED":
       return "danger";
     case "ABANDONED":
     case "PENDING":
@@ -172,6 +177,8 @@ export function toneForStatus(status: string): Tone {
     case "EXECUTION_BLOCKED":
     case "STOPPING_RULE_TRIGGERED":
     case "ACTION_GROUNDING_BLOCKED":
+    case "PAYPAL_CAPTURE_BLOCKED":
+    case "PAYPAL_ORDER_CREATION_BLOCKED":
       return "warning";
     case "IN_PROGRESS":
     case "OPEN":
@@ -181,9 +188,9 @@ export function toneForStatus(status: string): Tone {
     case "RECOVERY_ATTEMPT_STARTED":
     case "VERIFICATION_ATTEMPTED":
     case "HALLUCINATION_TEST":
+    case "PAYPAL_ORDER_CREATED":
+    case "PAYPAL_AI_ANALYSIS":
       return "info";
-    case "ACTION_GROUNDING_APPROVED":
-      return "success";
     case "ESCALATED":
       return "warning";
     default:

@@ -19,11 +19,7 @@ export const Route = createFileRoute("/api/ready")({
   server: {
     handlers: {
       GET: async () => {
-        type ServiceStatus =
-          | "connected"
-          | "invalid_credentials"
-          | "not_configured"
-          | "unavailable";
+        type ServiceStatus = "connected" | "invalid_credentials" | "not_configured" | "unavailable";
 
         // ── Supabase ──────────────────────────────────────────────────────────
         let supabaseStatus: ServiceStatus = "not_configured";
@@ -49,16 +45,11 @@ export const Route = createFileRoute("/api/ready")({
         }
 
         // ── PayPal ────────────────────────────────────────────────────────────
-        type PayPalStatus =
-          | "sandbox_connected"
-          | "live_connected"
-          | "not_configured"
-          | "error";
+        type PayPalStatus = "sandbox_connected" | "live_connected" | "not_configured" | "error";
         let paypalStatus: PayPalStatus = "not_configured";
         const hasPayPal =
           !!process.env["PAYPAL_CLIENT_ID"] && !!process.env["PAYPAL_CLIENT_SECRET"];
-        const paypalBase =
-          process.env["PAYPAL_BASE_URL"] ?? "https://api-m.sandbox.paypal.com";
+        const paypalBase = process.env["PAYPAL_BASE_URL"] ?? "https://api-m.sandbox.paypal.com";
 
         if (hasPayPal) {
           try {

@@ -23,10 +23,10 @@ export const Route = createFileRoute("/")({
 
 const STEPS = [
   { title: "Detect", body: "Every failed, abandoned and dunning event becomes a scored revenue-at-risk case." },
-  { title: "Diagnose", body: "Failure signals, customer history and payment method feed a structured diagnosis." },
-  { title: "Decide", body: "The agent selects one bounded action within your retry, window and probability limits." },
-  { title: "Act", body: "Simulated retries, reminders, alternate methods and re-engagement — never real charges." },
-  { title: "Verify", body: "Outcomes are measured, recoveries confirmed, and every step written to the audit log." },
+  { title: "Diagnose", body: "Failure signals, customer history and payment method feed a structured AI diagnosis." },
+  { title: "Decide", body: "The agent selects one bounded recovery action within your retry, window and probability limits." },
+  { title: "Verify", body: "Fresh DB + PayPal evidence must independently approve — AI recommendations never authorize execution." },
+  { title: "Act", body: "Only a deterministic APPROVE permits a PayPal Sandbox checkout or recovery execution." },
 ];
 
 function Landing() {
@@ -49,12 +49,13 @@ function Landing() {
       <main>
         <section className="grid-glow">
           <div className="mx-auto max-w-4xl px-6 py-24 text-center">
-            <Pill tone="info">Simulation-only recovery agent</Pill>
+            <Pill tone="info">PayPal AI Hackathon 2026</Pill>
             <h1 className="mt-6 text-4xl leading-tight font-semibold tracking-tight sm:text-6xl">
-              Recover the revenue your payment stack silently loses
+              AI-powered payment recovery with real PayPal Sandbox
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base text-muted-foreground sm:text-lg">
-              {DESCRIPTION}
+              RecoverAI detects failed payments, generates AI recovery recommendations, verifies every action
+              against authoritative evidence, and executes approved recoveries through the PayPal Orders API.
             </p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               <Button asChild size="lg">
@@ -63,11 +64,11 @@ function Landing() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">
-                <Link to="/auth">I already have an account</Link>
+                <Link to="/auth">Sign in</Link>
               </Button>
             </div>
             <p className="mt-4 text-xs text-muted-foreground">
-              Sign up seeds a reproducible dataset of 700+ synthetic transactions. No real payments are ever touched.
+              Free account · Seeded with synthetic payment data · Real PayPal Sandbox checkout included
             </p>
           </div>
         </section>
@@ -75,9 +76,9 @@ function Landing() {
         <section className="mx-auto max-w-6xl px-6 pb-20">
           <div className="grid gap-4 sm:grid-cols-3">
             {[
-              { icon: TrendingUp, title: "Quantified exposure", body: "Revenue at risk, recoverable revenue and recovery rate, tracked daily." },
-              { icon: Bot, title: "Explainable decisions", body: "Every recommendation ships with a diagnosis, probability and reason." },
-              { icon: ShieldCheck, title: "Hard guardrails", body: "Retry caps, opt-outs, high-value escalation and recovery windows are enforced server-side." },
+              { icon: TrendingUp, title: "Quantified exposure", body: "Revenue at risk, recoverable revenue and recovery rate, tracked daily from real data." },
+              { icon: Bot, title: "AI + deterministic safety", body: "The AI proposes. The deterministic verifier decides. Nothing executes outside that boundary." },
+              { icon: ShieldCheck, title: "Hard PayPal guardrails", body: "Amount, currency, order status and ownership verified before every capture. No duplicate charges." },
             ].map((f) => (
               <div key={f.title} className="panel p-5">
                 <f.icon className="size-5 text-primary" aria-hidden />
@@ -107,7 +108,7 @@ function Landing() {
 
       <footer className="border-t border-border py-8">
         <p className="text-center text-xs text-muted-foreground">
-          RecoverAI · demonstration environment · all payment data is synthetic
+          RecoverAI · PayPal AI Hackathon 2026 · Real PayPal Sandbox · Synthetic transaction data
         </p>
       </footer>
     </div>

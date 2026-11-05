@@ -33,10 +33,7 @@ export const Route = createFileRoute("/api/health")({
 
         // ── 1. Supabase — actual REST ping ────────────────────────────────────
         type SupabaseStatus =
-          | "connected"
-          | "invalid_credentials"
-          | "not_configured"
-          | "unavailable";
+          "connected" | "invalid_credentials" | "not_configured" | "unavailable";
         let supabaseStatus: SupabaseStatus = "not_configured";
 
         const supabaseUrl = process.env["SUPABASE_URL"];
@@ -68,17 +65,12 @@ export const Route = createFileRoute("/api/health")({
         }
 
         // ── 2. PayPal — actual OAuth attempt ─────────────────────────────────
-        type PayPalStatus =
-          | "sandbox_connected"
-          | "live_connected"
-          | "not_configured"
-          | "error";
+        type PayPalStatus = "sandbox_connected" | "live_connected" | "not_configured" | "error";
         let paypalStatus: PayPalStatus = "not_configured";
 
         const hasPayPal =
           !!process.env["PAYPAL_CLIENT_ID"] && !!process.env["PAYPAL_CLIENT_SECRET"];
-        const paypalBase =
-          process.env["PAYPAL_BASE_URL"] ?? "https://api-m.sandbox.paypal.com";
+        const paypalBase = process.env["PAYPAL_BASE_URL"] ?? "https://api-m.sandbox.paypal.com";
 
         if (hasPayPal) {
           try {
